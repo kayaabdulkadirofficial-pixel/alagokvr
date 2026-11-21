@@ -42,13 +42,27 @@ function ensurePanoramaxViewer() {
     const s = document.createElement("script");
     s.src = "https://cdn.jsdelivr.net/npm/@panoramax/web-viewer@5.3.1/build/cjs/index.js";
     s.async = true;
+    const timer = setTimeout(fail, 15000);
+    function fail() {
+      clearTimeout(timer);
+      s.remove();
+      reject(new Error("Panoramax görüntüleyici yüklenemedi"));
+    }
     s.onload = () => {
-      if (window.customElements?.whenDefined) {
-        window.customElements.whenDefined("pnx-viewer").then(resolve).catch(reject);
-      } else resolve();
+      if (!window.customElements) {
+        fail();
+        return;
+      }
+      window.customElements.whenDefined("pnx-viewer").then(() => {
+        clearTimeout(timer);
+        resolve();
+      }, fail);
     };
-    s.onerror = () => reject(new Error("Panoramax görüntüleyici yüklenemedi"));
+    s.onerror = fail;
     document.head.appendChild(s);
+  }).catch(error => {
+    panoramaxSdkPromise = null;
+    throw error;
   });
   return panoramaxSdkPromise;
 }
@@ -231,11 +245,15 @@ function buildEmbedUrl(item) {
   return `https://maps.google.com/maps?q=${q}&t=k&z=15&ie=UTF8&iwloc=&output=embed`;
 }
 
+function matchesCity(item, city) {
+  return !city || item.city === city || Boolean(item.cities?.includes(city));
+}
+
 function matches(item, q) {
  const hay = normalize([item.title,item.place,item.city,...(item.cities || []),item.tag,item.body,item.category === "milli" ? "milli millî park parkı parkları" : item.category === "tabiat" ? "tabiat park parkı parkları" : ""].join(" "));
  const words = q.split(/\s+/).filter(Boolean);
  return (filter === "all" || item.category === filter) &&
- (!citySelect.value || item.city === citySelect.value || item.cities?.includes(citySelect.value)) &&
+ matchesCity(item, citySelect.value) &&
  words.every(word => hay.includes(word));
 }
 
@@ -243,7 +261,7 @@ function render() {
   const q = normalize((search.value || "").trim());
   const items = window.ACTIVITIES.filter((item) => matches(item, q));
   const city = citySelect.value;
-  const cityTotal = window.ACTIVITIES.filter(item => !city || item.city === city).length;
+  const cityTotal = window.ACTIVITIES.filter(item => matchesCity(item, city)).length;
   citySummary.textContent = city
     ? `${city} · ${cityTotal ? cityTotal + " rota mevcut" : "Bu il için ayrıntılı rotalar henüz eklenmedi."}`
     : "81 il arasından seçim yapın veya tüm mevcut rotaları keşfedin.";
@@ -426,7 +444,11 @@ dialog.addEventListener("click", (e) => {
   if (e.target === dialog) dialog.close();
 });
 
-dialog.addEventListener("close", destroyModalPano);
+dialog.addEventListener("close", () => {
+  if (dialog.open) return;
+  currentModalItem = null;
+  destroyModalPano();
+});
 
 document.querySelector(".close").addEventListener("click", () => dialog.close());
 
